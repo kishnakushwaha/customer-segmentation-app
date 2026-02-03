@@ -118,6 +118,19 @@ if df is not None:
         
         top_customers = rfm[rfm['Segment'] == selected_segment_view].sort_values('Monetary', ascending=False).head(10)
         st.dataframe(top_customers[['Recency', 'Frequency', 'Monetary']])
+    
+    # --- Churn Reduction Tips ---
+    st.divider()
+    st.subheader(f"Churn Reduction Strategy: {selected_segment_view}")
+    
+    churn_tips = {
+        'VIP': "🌟 **Strategy for VIPs**: They are your most valuable asset. \n- **Personal Concierge**: Assign a dedicated account manager.\n- **Exclusive Access**: Give early access to new products or special events.\n- **No-Questions Returns**: Make their experience absolutely frictionless.",
+        'Loyal': "💎 **Strategy for Loyalists**: High frequency, good spend. \n- **Tiered Rewards**: Unlock higher points multipliers.\n- **Referral Bonuses**: They love you, so get them to bring friends.\n- **Community**: Invite them to be brand ambassadors.",
+        'Potential': "🚀 **Strategy for Potential**: Good recent behavior, but lower spend. \n- **Gamification**: 'Spend ₹500 more to unlock free shipping'.\n- **Cross-Sell**: Recommend accessories matching their recent purchase.\n- **Time-Limited Offers**: Create urgency to build a habit.",
+        'At-Risk': "⚠️ **Strategy for At-Risk**: High past value, but slipping away. \n- **Win-Back Campaigns**: 'We miss you! Here is ₹200 off'.\n- **Surveys**: Ask *why* they stopped buying (maybe bad service?).\n- **Re-activation**: Show them what's new since they left."
+    }
+    
+    st.info(churn_tips.get(selected_segment_view))
 
     if input_type == "Select Existing Customer":
         selected_customer_id = st.sidebar.selectbox("Select Customer ID", rfm.index.unique())
