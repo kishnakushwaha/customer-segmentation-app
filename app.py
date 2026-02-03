@@ -9,8 +9,7 @@ import datetime
 # --- Configuration ---
 st.set_page_config(page_title="Customer Segmentation App", layout="wide")
 
-st.title("Customer Segmentation with K-Means")
-st.write("Upload 'Online Retail.xlsx' is processed automatically from the current directory.")
+st.title("Customer Segmentation Dashboard")
 
 # --- 1. Load Data ---
 @st.cache_data
@@ -29,27 +28,15 @@ def load_data():
 df = load_data()
 
 if df is not None:
-    # --- 2. Clean Data ---
-    st.subheader("Data Processing Status")
-    
-    # Remove null CustomerIDs
+    # --- 2. Data Cleaning & KPI Preparation ---
     df_clean = df.dropna(subset=['CustomerID'])
-    
-    # Filter non-positive Quantity and UnitPrice
     df_clean = df_clean[(df_clean['Quantity'] > 0) & (df_clean['UnitPrice'] > 0)]
-    
-    st.write(f"Original Rows: {len(df)}")
-    st.write(f"Cleaned Rows: {len(df_clean)}")
+    df_clean['TotalPrice'] = df_clean['Quantity'] * df_clean['UnitPrice']
 
     # --- 3. RFM Calculation ---
-    # Reference date = max date + 1 day
     max_date = df_clean['InvoiceDate'].max()
     reference_date = max_date + datetime.timedelta(days=1)
     
-    # Create TotalPrice column
-    df_clean['TotalPrice'] = df_clean['Quantity'] * df_clean['UnitPrice']
-    
-    # Group by CustomerID
     rfm = df_clean.groupby('CustomerID').agg({
         'InvoiceDate': lambda x: (reference_date - x.max()).days,
         'InvoiceNo': 'nunique',
@@ -61,118 +48,105 @@ if df is not None:
         'InvoiceNo': 'Frequency',
         'TotalPrice': 'Monetary'
     }, inplace=True)
-    
-    st.write(f"Number of Customers: {len(rfm)}")
 
-    # --- 4. Preprocessing (Log Transform + Scaling) ---
-    # Log transformation to handle skewness
+    # --- 4. Preprocessing ---
     rfm_log = np.log1p(rfm)
-    
     scaler = StandardScaler()
     rfm_scaled = scaler.fit_transform(rfm_log)
     rfm_scaled_df = pd.DataFrame(rfm_scaled, index=rfm.index, columns=rfm.columns)
 
-    # --- 5. Build Model (K-Means) ---
+    # --- 5. Clustering (k=4) ---
     kmeans = KMeans(n_clusters=4, random_state=42)
-    rfm['Cluster'] = kmeans.fit_predict(rfm_scaled_df)
-    
-    # Labeling Logic (Heuristic based on RFM mean)
-    # We want to label clusters based on value.
-    # Generally: High Recency is bad, High Frequency is good, High Monetary is good.
-    # Let's calculate a Score for each cluster to rank them.
-    # Score = F_mean + M_mean - R_mean (This is very rough, but works for sorting)
-    
-    cluster_avg = rfm.groupby('Cluster').mean()
-    
-    # Simple ranking: Sort by Monetary first? Or a combination. 
-    # Let's try to map the random cluster IDs to ordered labels.
-    # We will rank clusters by a simple heuristic: Monetary value is usually King.
-    cluster_avg['Rank_Monetary'] = cluster_avg['Monetary'].rank(ascending=True)
-    
-    # Map cluster ID to label based on Monetary rank
-    # 0 -> Bronze, 1 -> Silver, 2 -> Gold, 3 -> Platinum (just examples)
-    # The prompt actually asked for labels like 'VVIP', 'Loyal', 'At-Risk'.
-    # Without deep analysis, hard mapping is difficult. 
-    # We will just show the Cluster stats and let the user interpret or use generic names like "Segment 1 (Highest Value)", etc.
-    # However, to meet the prompt's request for "VVIP", "Loyal", etc., I will attempt a dynamic assignment.
-    
-    def assign_bucket(row):
-        # We need to look at the cluster averages and assign names.
-        # This is a bit complex to do dynamically in one go without inspecting the data.
-        # So I will just stick to "Cluster 0", "Cluster 1"... but displayed nicely.
-        # OR, I will assign based on the sorted Monetary value for now, as that's the safest proxy for "VVIP".
-        return row['Cluster']
+    clusters = kmeans.fit_predict(rfm_scaled_df)
+    rfm['Cluster'] = clusters
 
-    # Let's just create a readable description for the clusters
-    cluster_summary = rfm.groupby('Cluster').agg({
-        'Recency': 'mean',
-        'Frequency': 'mean',
-        'Monetary': 'mean',
-        'Cluster': 'count'
-    }).rename(columns={'Cluster': 'Count'}).sort_values('Monetary')
-    
-    st.write("### Cluster Summary")
-    st.dataframe(cluster_summary)
-    
-    # Map clusters to names based on sorted Monetary
-    # The cluster with highest Monetary is VVIP
-    sorted_clusters = cluster_summary.index.tolist() # [lowest_monetary_cluster_id, ..., highest_monetary_cluster_id]
+    # --- Segment Mapping (Monetary Based) ---
+    cluster_avg = rfm.groupby('Cluster')['Monetary'].mean().sort_values(ascending=False)
+    # Rank 1 (Highest M) -> VIP, 2 -> Loyal, 3 -> Potential, 4 -> At-Risk
+    sorted_clusters = cluster_avg.index.tolist()
     
     label_map = {
-        sorted_clusters[0]: "Low Value / At Risk",
-        sorted_clusters[1]: "Moderate Value",
-        sorted_clusters[2]: "Loyal / High Value",
-        sorted_clusters[3]: "VVIP / Champions"
+        sorted_clusters[0]: 'VIP',
+        sorted_clusters[1]: 'Loyal',
+        sorted_clusters[2]: 'Potential',
+        sorted_clusters[3]: 'At-Risk'
     }
-    
     rfm['Segment'] = rfm['Cluster'].map(label_map)
 
+    # --- KPI Metrics (Top) ---
+    total_customers = len(rfm)
+    avg_revenue = rfm['Monetary'].mean()
+    total_sales = rfm['Monetary'].sum()
 
-    # --- 6. Interface (User Input) ---
+    kpi1, kpi2, kpi3 = st.columns(3)
+    kpi1.metric("Total Customers", f"{total_customers:,}")
+    kpi2.metric("Avg Revenue per Customer", f"${avg_revenue:,.2f}")
+    kpi3.metric("Total Sales", f"${total_sales:,.2f}")
+
     st.divider()
-    st.subheader("Customer Segmentation Lookup")
+
+    # --- Visuals & Data ---
+    col_chart, col_data = st.columns([1, 1])
+
+    with col_chart:
+        st.subheader("Segment Distribution")
+        segment_counts = rfm['Segment'].value_counts()
+        st.bar_chart(segment_counts)
+        
+        st.caption("Distribution of customers across segments.")
+
+    with col_data:
+        st.subheader("Top Customers")
+        selected_segment_view = st.selectbox("View Top 10 Customers for:", ['VIP', 'Loyal', 'Potential', 'At-Risk'])
+        
+        top_customers = rfm[rfm['Segment'] == selected_segment_view].sort_values('Monetary', ascending=False).head(10)
+        st.dataframe(top_customers[['Recency', 'Frequency', 'Monetary']])
+
+    # --- Sidebar: Inputs & Strategy ---
+    st.sidebar.header("Customer Lookup")
     
-    input_type = st.radio("Input Type", ["Select Existing Customer", "Manual Entry"])
+    input_type = st.sidebar.radio("Input Type", ["Select Existing Customer", "Manual Entry"])
     
     predicted_segment = None
     
     if input_type == "Select Existing Customer":
-        selected_customer_id = st.selectbox("Select Customer ID", rfm.index.unique())
+        selected_customer_id = st.sidebar.selectbox("Select Customer ID", rfm.index.unique())
         if selected_customer_id:
             cust_data = rfm.loc[selected_customer_id]
-            st.write(f"**RFM Values**: R={cust_data['Recency']:.2f}, F={cust_data['Frequency']:.2f}, M={cust_data['Monetary']:.2f}")
             predicted_segment = cust_data['Segment']
-            st.success(f"The customer belongs to: **{predicted_segment}**")
             
+            st.sidebar.markdown(f"### Result: **{predicted_segment}**")
+            st.sidebar.write(f"Recency: {cust_data['Recency']:.0f} days")
+            st.sidebar.write(f"Frequency: {cust_data['Frequency']:.0f}")
+            st.sidebar.write(f"Monetary: ${cust_data['Monetary']:.2f}")
+
     else:
-        c_r = st.number_input("Recency (days)", min_value=0, value=10)
-        c_f = st.number_input("Frequency (count)", min_value=0, value=5)
-        c_m = st.number_input("Monetary (total)", min_value=0.0, value=100.0)
+        st.sidebar.subheader("Predict Segment")
+        c_r = st.sidebar.number_input("Recency (days)", min_value=0, value=30)
+        c_f = st.sidebar.number_input("Frequency (count)", min_value=0, value=5)
+        c_m = st.sidebar.number_input("Monetary ($)", min_value=0.0, value=500.0)
         
-        if st.button("Predict"):
-            # We need to preprocess this single point exactly like the training data
+        if st.sidebar.button("Predict Segment"):
+             # Manual Prediction
             input_df = pd.DataFrame([[c_r, c_f, c_m]], columns=['Recency', 'Frequency', 'Monetary'])
             input_log = np.log1p(input_df)
             input_scaled = scaler.transform(input_log)
             pred_cluster = kmeans.predict(input_scaled)[0]
             predicted_segment = label_map[pred_cluster]
-            st.success(f"The Manual Profile belongs to: **{predicted_segment}**")
+            st.sidebar.success(f"Predicted: **{predicted_segment}**")
 
-    # --- 7. Visualization ---
-    st.divider()
-    st.subheader("3D Cluster Visualization")
-    
-    fig = px.scatter_3d(
-        rfm, 
-        x='Recency', 
-        y='Frequency', 
-        z='Monetary', 
-        color='Segment',
-        opacity=0.7,
-        size_max=10,
-        title="Customer Segments (3D Plot)"
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    # --- Recommendation Box ---
+    if predicted_segment:
+        tips = {
+            'VIP': "🏆 **VIP Tip**: Assign a dedicated account manager and offer exclusive pre-access to new collections.",
+            'Loyal': "💎 **Loyal Tip**: Invite to a premium loyalty tier with free shipping or points multipliers.",
+            'Potential': "🚀 **Potential Tip**: Offer a time-limited discount on their next purchase to increase frequency.",
+            'At-Risk': "⚠️ **At-Risk Tip**: Send a personalized 'We Miss You' email with a strong win-back incentive."
+        }
+        st.info(tips.get(predicted_segment, "Select a customer to see recommendations."))
+    else:
+        st.info("👈 Select or Enter a Customer in the sidebar to see specific recommendations.")
 
 else:
-    st.warning("Data not loaded. Please fix the file issue.")
+    st.warning("Data not loaded. Please ensure 'Online Retail.xlsx' is in the directory.")
+
