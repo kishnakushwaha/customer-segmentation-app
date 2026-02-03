@@ -4,4 +4,6 @@ scikit-learn
 matplotlib
 seaborn
 plotly
-streamlit
+streamlit>=1.40.0
+altair
+watchdog
