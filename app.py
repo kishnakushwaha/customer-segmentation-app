@@ -73,16 +73,33 @@ if df is not None:
     }
     rfm['Segment'] = rfm['Cluster'].map(label_map)
 
+    # --- Sidebar: Inputs & Strategy ---
+    st.sidebar.header("Settings")
+    churn_threshold = st.sidebar.slider("Churn Threshold (Days)", 30, 365, 90)
+    
+    st.sidebar.divider()
+    
+    st.sidebar.header("Customer Lookup")
+    
+    input_type = st.sidebar.radio("Input Type", ["Select Existing Customer", "Manual Entry"])
+    
+    predicted_segment = None
+    
     # --- KPI Metrics (Top) ---
     total_customers = len(rfm)
     avg_revenue = rfm['Monetary'].mean()
     total_sales = rfm['Monetary'].sum()
+    
+    # Churn Calculation
+    churn_count = rfm[rfm['Recency'] > churn_threshold].shape[0]
+    churn_rate = (churn_count / total_customers) * 100
 
-    kpi1, kpi2, kpi3 = st.columns(3)
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     kpi1.metric("Total Customers", f"{total_customers:,}")
-    kpi2.metric("Avg Revenue per Customer", f"${avg_revenue:,.2f}")
-    kpi3.metric("Total Sales", f"${total_sales:,.2f}")
-
+    kpi2.metric("Avg Revenue", f"₹{avg_revenue:,.2f}")
+    kpi3.metric("Total Sales", f"₹{total_sales:,.2f}")
+    kpi4.metric("Churn Rate", f"{churn_rate:.1f}%", help=f"Customers inactive for > {churn_threshold} days")
+    
     st.divider()
 
     # --- Visuals & Data ---
@@ -102,13 +119,6 @@ if df is not None:
         top_customers = rfm[rfm['Segment'] == selected_segment_view].sort_values('Monetary', ascending=False).head(10)
         st.dataframe(top_customers[['Recency', 'Frequency', 'Monetary']])
 
-    # --- Sidebar: Inputs & Strategy ---
-    st.sidebar.header("Customer Lookup")
-    
-    input_type = st.sidebar.radio("Input Type", ["Select Existing Customer", "Manual Entry"])
-    
-    predicted_segment = None
-    
     if input_type == "Select Existing Customer":
         selected_customer_id = st.sidebar.selectbox("Select Customer ID", rfm.index.unique())
         if selected_customer_id:
@@ -118,13 +128,13 @@ if df is not None:
             st.sidebar.markdown(f"### Result: **{predicted_segment}**")
             st.sidebar.write(f"Recency: {cust_data['Recency']:.0f} days")
             st.sidebar.write(f"Frequency: {cust_data['Frequency']:.0f}")
-            st.sidebar.write(f"Monetary: ${cust_data['Monetary']:.2f}")
+            st.sidebar.write(f"Monetary: ₹{cust_data['Monetary']:.2f}")
 
     else:
         st.sidebar.subheader("Predict Segment")
         c_r = st.sidebar.number_input("Recency (days)", min_value=0, value=30)
         c_f = st.sidebar.number_input("Frequency (count)", min_value=0, value=5)
-        c_m = st.sidebar.number_input("Monetary ($)", min_value=0.0, value=500.0)
+        c_m = st.sidebar.number_input("Monetary (₹)", min_value=0.0, value=500.0)
         
         if st.sidebar.button("Predict Segment"):
              # Manual Prediction
